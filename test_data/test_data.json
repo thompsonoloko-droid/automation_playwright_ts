@@ -1,0 +1,104 @@
+{
+  "api": {
+    "base_url": "https://automationexercise.com/api",
+    "timeout": 5000,
+    "test_user_template": {
+      "name": "Test User",
+      "firstname": "Test",
+      "lastname": "User",
+      "email": "testuser@example.com",
+      "password": "Testingpassword123",
+      "title": "Mr",
+      "birth_date": "1990-01-01",
+      "address": "123 Test St",
+      "address1": "123 Test St",
+      "city": "Testville",
+      "state": "TS",
+      "zipcode": "12345",
+      "mobile_number": "1234567890",
+      "country": "Testland"
+    },
+    "update_user_template": {
+      "name": "Updated User",
+      "firstname": "Updated",
+      "lastname": "User",
+      "email": "updateduser@example.com",
+      "password": "UpdatedPassword123",
+      "title": "Ms",
+      "birth_date": "1991-02-02",
+      "address": "456 Update Ave",
+      "address1": "456 Update Ave",
+      "city": "Updatecity",
+      "state": "UP",
+      "zipcode": "54321",
+      "mobile_number": "0987654321",
+      "country": "Testland"
+    },
+    "search_terms": ["Top", "Dress", "Men"],
+    "users": [
+      {
+        "id": "user1",
+        "email": "testuser@example.com",
+        "password": "Testingpassword123",
+        "valid": true
+      },
+      { "id": "user2", "email": "invalid@example.com", "password": "wrongpass", "valid": false }
+    ],
+    "invalid_login_attempts": [
+      {
+        "id": "bad1",
+        "email": "bad@example.com",
+        "password": "badpass",
+        "expected_code": 404,
+        "expected_message": "User not found!"
+      },
+      {
+        "id": "empty",
+        "email": "",
+        "password": "",
+        "expected_code": 404,
+        "expected_message": "User not found!"
+      }
+    ]
+  },
+  "performance": {
+    "api_response_time_ms": 3000,
+    "page_load_time_ms": 5000,
+    "pages": [
+      { "name": "Home", "path": "/", "max_ms": 8000 },
+      { "name": "Login", "path": "/login", "max_ms": 8000 }
+    ],
+    "api_endpoints": [
+      {
+        "name": "Verify Login",
+        "method": "POST",
+        "path": "/verifyLogin",
+        "data": { "email": "testuser@example.com", "password": "Testingpassword123" },
+        "max_ms": 3500
+      },
+      {
+        "name": "Create Account",
+        "method": "POST",
+        "path": "/createAccount",
+        "data": { "email": "newuser@example.com", "password": "Testingpassword123" },
+        "max_ms": 4000
+      }
+    ]
+  },
+  "users": [
+    {
+      "id": "user1",
+      "email": "testuser@example.com",
+      "password": "Testingpassword123",
+      "valid": true
+    }
+  ],
+  "invalid_credentials": [
+    {
+      "id": "bad1",
+      "email": "bad@example.com",
+      "password": "badpass",
+      "error_contains": "incorrect"
+    }
+  ]
+}

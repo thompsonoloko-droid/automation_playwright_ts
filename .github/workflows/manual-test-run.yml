@@ -1,0 +1,150 @@
+# GitHub Actions workflow for manual on-demand test execution
+# Allows QA teams to trigger specific test suites with custom parameters
+# Features:
+#   - Runs on Windows (windows-latest)
+#   - Suite selection: all, smoke, ui, api
+#   - Browser selection: chromium, firefox, webkit, all
+#   - HTML reports + artifact uploads
+
+name: Manual Test Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: "Test suite to run"
+        required: true
+        type: choice
+        options:
+          - all
+          - smoke
+          - ui
+          - api
+      browser:
+        description: "Browser to test"
+        required: true
+        type: choice
+        options:
+          - chromium
+          - firefox
+          - webkit
+          - all
+      retries:
+        description: "Number of retries for flaky tests"
+        required: false
+        type: choice
+        options:
+          - "0"
+          - "1"
+          - "2"
+          - "3"
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  run-tests:
+    name: "${{ github.event.inputs.test_suite }} — ${{ github.event.inputs.browser }}"
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        shell: pwsh
+        run: |
+          $browser = "${{ github.event.inputs.browser }}"
+          if ($browser -eq "all") {
+            npx playwright install --with-deps
+          } else {
+            npx playwright install --with-deps $browser
+          }
+
+      - name: Build test command
+        id: cmd
+        shell: pwsh
+        run: |
+          $suite = "${{ github.event.inputs.test_suite }}"
+          $browser = "${{ github.event.inputs.browser }}"
+          $retries = "${{ github.event.inputs.retries }}"
+
+          $args = @()
+
+          # Suite filter
+          switch ($suite) {
+            "smoke"  { $args += "--grep", "@smoke" }
+            "ui"     { $args += "tests/ui/" }
+            "api"    { $args += "tests/api/" }
+          }
+
+          # Browser filter
+          if ($browser -ne "all") {
+            $args += "--project=$browser"
+          }
+
+          # Retries
+          if ($retries -and $retries -ne "0") {
+            $args += "--retries=$retries"
+          }
+
+          # Reporter
+          $args += "--reporter=list,html"
+
+          $cmdArgs = $args -join " "
+          Write-Host "Test command args: $cmdArgs"
+          echo "args=$cmdArgs" >> $env:GITHUB_OUTPUT
+
+      - name: Run tests
+        id: tests
+        env:
+          TEST_USER_NAME: ${{ secrets.TEST_USER_NAME }}
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+          CARD_NAME: ${{ secrets.CARD_NAME }}
+          CARD_NUMBER: ${{ secrets.CARD_NUMBER }}
+          CARD_CVC: ${{ secrets.CARD_CVC }}
+          CARD_EXPIRY_MONTH: ${{ secrets.CARD_EXPIRY_MONTH }}
+          CARD_EXPIRY_YEAR: ${{ secrets.CARD_EXPIRY_YEAR }}
+          CI: "true"
+        run: npx playwright test ${{ steps.cmd.outputs.args }}
+        continue-on-error: true
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-test-results-${{ github.run_id }}
+          path: |
+            reports/
+            test-results/
+          retention-days: 30
+
+      - name: Write step summary
+        if: always()
+        shell: pwsh
+        run: |
+          $status = "${{ steps.tests.outcome }}"
+          $icon = if ($status -eq "success") { "✅" } else { "❌" }
+
+          @"
+          ## Manual Test Run
+
+          | Parameter | Value |
+          |-----------|-------|
+          | Suite | ${{ github.event.inputs.test_suite }} |
+          | Browser | ${{ github.event.inputs.browser }} |
+          | Retries | ${{ github.event.inputs.retries }} |
+          | Status | $icon $status |
+          | Triggered by | ${{ github.actor }} |
+          "@ >> $env:GITHUB_STEP_SUMMARY

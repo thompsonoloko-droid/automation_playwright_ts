@@ -1,0 +1,150 @@
+# GitHub Actions workflow for continuous health monitoring
+# Triggers: Every 6 hours + manual dispatch
+# Features:
+#   - Runs on Windows (windows-latest)
+#   - Multi-browser smoke tests (Chromium, Firefox)
+#   - Auto-retry via Playwright config (CI retries = 1)
+#   - HTML reports per browser
+#   - Slack notifications on completion
+#   - 7-day artifact retention
+
+name: Scheduled Smoke Tests
+
+on:
+  schedule:
+    - cron: "0 */6 * * *" # Every 6 hours
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to test"
+        required: false
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+# ============================================================================
+# JOB 1: SMOKE TESTS — Multi-browser health check
+# ============================================================================
+jobs:
+  smoke-tests:
+    name: Smoke Tests (${{ matrix.browser }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser (${{ matrix.browser }})
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run smoke tests (${{ matrix.browser }})
+        id: tests
+        env:
+          TEST_USER_NAME: ${{ secrets.TEST_USER_NAME }}
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+          CARD_NAME: ${{ secrets.CARD_NAME }}
+          CARD_NUMBER: ${{ secrets.CARD_NUMBER }}
+          CARD_CVC: ${{ secrets.CARD_CVC }}
+          CARD_EXPIRY_MONTH: ${{ secrets.CARD_EXPIRY_MONTH }}
+          CARD_EXPIRY_YEAR: ${{ secrets.CARD_EXPIRY_YEAR }}
+          CI: "true"
+        run: npx playwright test --grep @smoke --project=${{ matrix.browser }} --reporter=list,html
+        continue-on-error: true
+
+      - name: Upload results (${{ matrix.browser }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results-${{ matrix.browser }}-${{ github.run_id }}
+          path: |
+            reports/
+            test-results/
+          retention-days: 7
+
+      - name: Write step summary
+        if: always()
+        shell: pwsh
+        run: |
+          $status = "${{ steps.tests.outcome }}"
+          $icon = if ($status -eq "success") { "✅" } else { "❌" }
+
+          @"
+          ## Scheduled Smoke — ${{ matrix.browser }}
+
+          | Status | Browser | Time |
+          |--------|---------|------|
+          | $icon $status | ${{ matrix.browser }} | $(Get-Date -Format "yyyy-MM-dd HH:mm UTC") |
+          "@ >> $env:GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # JOB 2: NOTIFY — Slack alert with results
+  # ============================================================================
+  notify:
+    name: Notify
+    runs-on: windows-latest
+    needs: smoke-tests
+    if: always()
+    timeout-minutes: 5
+
+    steps:
+      - name: Determine status
+        id: status
+        shell: pwsh
+        run: |
+          $result = "${{ needs.smoke-tests.result }}"
+          if ($result -eq "success") {
+            echo "status=✅ Smoke tests passed" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "status=❌ Smoke tests failed" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Slack notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v2
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          payload: |
+            {
+              "text": "Scheduled Smoke (TS): ${{ steps.status.outputs.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Playwright TS — Scheduled Smoke*\n${{ steps.status.outputs.status }}\nBranch: `${{ github.ref_name }}`"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": { "type": "plain_text", "text": "View Run" },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        continue-on-error: true

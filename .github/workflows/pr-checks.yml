@@ -1,0 +1,175 @@
+# GitHub Actions workflow for Pull Request validation
+# Triggers on: PR opened, synchronized, or reopened to main/develop branches
+# Features:
+#   - Runs on Windows (windows-latest)
+#   - Commit message validation (conventional commits)
+#   - Sensitive file detection (blocks .env, secrets, credentials)
+#   - TypeScript compile check
+#   - Smoke tests on Chromium only (fast feedback)
+#   - Concurrency control: cancels old runs on new commits
+
+name: Pull Request Checks
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# ============================================================================
+# JOB 1: VALIDATE — Check commit messages and file changes
+# ============================================================================
+jobs:
+  validate:
+    name: Validate Changes
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commit messages
+        shell: pwsh
+        run: |
+          $commitMsg = git log -1 --pretty=%B
+          Write-Host "Commit message: $commitMsg"
+
+          if ([string]::IsNullOrWhiteSpace($commitMsg)) {
+            Write-Host "::error::Commit message is empty"
+            exit 1
+          }
+
+          if ($commitMsg -notmatch "^(feat|fix|docs|style|refactor|perf|test|chore|ci|build)(\(.+\))?!?:") {
+            Write-Host "::warning::Commit message doesn't follow conventional commits"
+            Write-Host "Example: feat(tests): add new test case"
+          }
+
+      - name: Check for sensitive files
+        shell: pwsh
+        run: |
+          $changedFiles = git diff --name-only origin/main...HEAD 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Could not diff against origin/main — skipping sensitive file check"
+            exit 0
+          }
+
+          Write-Host "Files changed:"
+          $changedFiles | ForEach-Object { Write-Host "  $_" }
+
+          $sensitive = $changedFiles | Where-Object { $_ -match "\.(env|env\..*)$|secrets|credentials" }
+          if ($sensitive) {
+            Write-Host "::error::Sensitive files detected — remove before pushing:"
+            $sensitive | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+
+  # ============================================================================
+  # JOB 2: TYPE CHECK — Ensure TypeScript compiles cleanly
+  # ============================================================================
+  type-check:
+    name: TypeScript Check
+    runs-on: windows-latest
+    needs: validate
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript compile check
+        run: npx tsc --noEmit
+
+  # ============================================================================
+  # JOB 3: SMOKE TEST — Fast feedback on Chromium only
+  # ============================================================================
+  smoke-test:
+    name: Smoke Tests (PR)
+    runs-on: windows-latest
+    needs: validate
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        env:
+          TEST_USER_NAME: ${{ secrets.TEST_USER_NAME }}
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+          CARD_NAME: ${{ secrets.CARD_NAME }}
+          CARD_NUMBER: ${{ secrets.CARD_NUMBER }}
+          CARD_CVC: ${{ secrets.CARD_CVC }}
+          CARD_EXPIRY_MONTH: ${{ secrets.CARD_EXPIRY_MONTH }}
+          CARD_EXPIRY_YEAR: ${{ secrets.CARD_EXPIRY_YEAR }}
+          CI: "true"
+        run: npx playwright test --grep @smoke --project=chromium --reporter=list,html
+        continue-on-error: true
+
+      - name: Upload smoke test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-results-pr
+          path: |
+            reports/
+            test-results/
+          retention-days: 7
+
+  # ============================================================================
+  # JOB 4: PR SUMMARY — Comment with results overview
+  # ============================================================================
+  pr-summary:
+    name: PR Summary
+    runs-on: windows-latest
+    needs: [type-check, smoke-test]
+    if: always()
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Write PR summary
+        shell: pwsh
+        run: |
+          $typeCheck = "${{ needs.type-check.result }}"
+          $smoke = "${{ needs.smoke-test.result }}"
+
+          $typeIcon = if ($typeCheck -eq "success") { "✅" } else { "❌" }
+          $smokeIcon = if ($smoke -eq "success") { "✅" } else { "❌" }
+
+          @"
+          ## PR Check Results
+
+          | Check | Status |
+          |-------|--------|
+          | TypeScript Compile | $typeIcon $typeCheck |
+          | Smoke Tests (Chromium) | $smokeIcon $smoke |
+          "@ >> $env:GITHUB_STEP_SUMMARY

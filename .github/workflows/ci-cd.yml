@@ -1,0 +1,316 @@
+# GitHub Actions CI/CD pipeline for Playwright TypeScript test automation
+# Triggers on:
+#   - Push to main and develop branches
+#   - Pull requests to main branch
+#   - Daily schedule at 8 AM UTC
+#   - Manual trigger (workflow_dispatch)
+#
+# Features:
+#   - Runs on Windows (windows-latest)
+#   - Multi-browser testing (Chromium, Firefox, WebKit)
+#   - Parallel test execution by browser
+#   - Auto-retry for flaky tests (CI retries configured in playwright.config.ts)
+#   - HTML reports per browser
+#   - Test artifact uploads with 30-day retention
+#   - GitHub step summary with per-browser status
+
+name: Test Automation Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 8 * * *" # Daily at 8 AM UTC
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: "Test suite to run"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - smoke
+          - ui
+          - api
+
+env:
+  NODE_VERSION: "20"
+
+permissions:
+  contents: read
+
+# Prevent duplicate runs on rapid pushes
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# ============================================================================
+# JOB 1: LINT — TypeScript compilation and code checks
+# ============================================================================
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript compile check
+        run: npx tsc --noEmit
+
+  # ============================================================================
+  # JOB 2: MULTI-BROWSER TESTING — Parallel test execution across browsers
+  # ============================================================================
+  test:
+    name: Test Suite (${{ matrix.browser }})
+    runs-on: windows-latest
+    needs: lint
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser (${{ matrix.browser }})
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Verify required secrets
+        env:
+          TEST_USER_NAME: ${{ secrets.TEST_USER_NAME }}
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+          CARD_NAME: ${{ secrets.CARD_NAME }}
+          CARD_NUMBER: ${{ secrets.CARD_NUMBER }}
+          CARD_CVC: ${{ secrets.CARD_CVC }}
+          CARD_EXPIRY_MONTH: ${{ secrets.CARD_EXPIRY_MONTH }}
+          CARD_EXPIRY_YEAR: ${{ secrets.CARD_EXPIRY_YEAR }}
+        shell: pwsh
+        run: |
+          $missing = @()
+          $vars = @(
+            "TEST_USER_NAME", "TEST_USER_EMAIL", "TEST_USER_PASSWORD",
+            "CARD_NAME", "CARD_NUMBER", "CARD_CVC",
+            "CARD_EXPIRY_MONTH", "CARD_EXPIRY_YEAR"
+          )
+          foreach ($v in $vars) {
+            $val = [Environment]::GetEnvironmentVariable($v)
+            if ([string]::IsNullOrEmpty($val)) {
+              Write-Host "MISSING: $v"
+              $missing += $v
+            } else {
+              Write-Host "FOUND: $v"
+            }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::Missing secrets: $($missing -join ', '). Add them in Settings > Secrets > Actions."
+            exit 1
+          }
+
+      - name: Determine test command
+        id: test-cmd
+        shell: pwsh
+        run: |
+          $suite = "${{ github.event.inputs.test_suite }}"
+          if ($suite -eq "smoke") {
+            echo "args=--grep @smoke --project=${{ matrix.browser }}" >> $env:GITHUB_OUTPUT
+          } elseif ($suite -eq "ui") {
+            echo "args=tests/ui/ --project=${{ matrix.browser }}" >> $env:GITHUB_OUTPUT
+          } elseif ($suite -eq "api") {
+            echo "args=tests/api/ --project=${{ matrix.browser }}" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "args=--project=${{ matrix.browser }}" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Run Playwright tests (${{ matrix.browser }})
+        id: tests
+        env:
+          TEST_USER_NAME: ${{ secrets.TEST_USER_NAME }}
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+          CARD_NAME: ${{ secrets.CARD_NAME }}
+          CARD_NUMBER: ${{ secrets.CARD_NUMBER }}
+          CARD_CVC: ${{ secrets.CARD_CVC }}
+          CARD_EXPIRY_MONTH: ${{ secrets.CARD_EXPIRY_MONTH }}
+          CARD_EXPIRY_YEAR: ${{ secrets.CARD_EXPIRY_YEAR }}
+          CI: "true"
+        run: npx playwright test ${{ steps.test-cmd.outputs.args }} --reporter=list,html,junit
+        continue-on-error: false
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.browser }}
+          path: |
+            reports/
+            test-results/
+            playwright-report/
+          retention-days: 30
+
+      - name: Write step summary
+        if: always()
+        shell: pwsh
+        run: |
+          $status = "${{ steps.tests.outcome }}"
+          $icon = if ($status -eq "success") { "✅" } else { "❌" }
+
+          @"
+          ## Test Results — ${{ matrix.browser }}
+
+          | Status | Browser |
+          |--------|---------|
+          | $icon $status | ${{ matrix.browser }} |
+          "@ >> $env:GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # JOB 3: MOBILE TESTING — iPhone & Android emulation (Chromium only)
+  # ============================================================================
+  mobile-test:
+    name: Mobile Tests
+    runs-on: windows-latest
+    needs: lint
+    timeout-minutes: 30
+    if: github.event.inputs.test_suite != 'api'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright install --with-deps webkit
+
+      - name: Run mobile tests
+        id: mobile
+        env:
+          TEST_USER_NAME: ${{ secrets.TEST_USER_NAME }}
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+          CARD_NAME: ${{ secrets.CARD_NAME }}
+          CARD_NUMBER: ${{ secrets.CARD_NUMBER }}
+          CARD_CVC: ${{ secrets.CARD_CVC }}
+          CARD_EXPIRY_MONTH: ${{ secrets.CARD_EXPIRY_MONTH }}
+          CARD_EXPIRY_YEAR: ${{ secrets.CARD_EXPIRY_YEAR }}
+          CI: "true"
+        run: npx playwright test --project=mobile-chrome --project=mobile-safari --reporter=list,html
+        continue-on-error: true
+
+      - name: Upload mobile test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-mobile
+          path: |
+            reports/
+            test-results/
+          retention-days: 30
+
+  # ============================================================================
+  # JOB 4: NOTIFICATIONS — Slack alerts and GitHub issue on failure
+  # ============================================================================
+  notify:
+    name: Send Notifications
+    runs-on: windows-latest
+    needs: [test, mobile-test]
+    if: always()
+    timeout-minutes: 5
+    permissions:
+      issues: write
+
+    steps:
+      - name: Determine build status
+        id: status
+        shell: pwsh
+        run: |
+          $testResult = "${{ needs.test.result }}"
+          if ($testResult -eq "success") {
+            echo "status=✅ All tests passed" >> $env:GITHUB_OUTPUT
+            echo "color=good" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "status=❌ Some tests failed" >> $env:GITHUB_OUTPUT
+            echo "color=danger" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Slack notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v2
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          payload: |
+            {
+              "text": "Playwright TS Pipeline: ${{ steps.status.outputs.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Playwright TS — CI/CD*\n${{ steps.status.outputs.status }}\nBranch: `${{ github.ref_name }}`\nCommit: `${{ github.sha }}`"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": { "type": "plain_text", "text": "View Run" },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        continue-on-error: true
+
+      - name: Create GitHub issue on failure
+        if: failure() && github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔴 CI Pipeline Failed — ${context.sha.substring(0, 7)}`,
+              body: `**Build failed** on branch \`${context.ref}\`\n\n` +
+                    `[View run](${context.payload.repository.html_url}/actions/runs/${context.runId})`
+            });
+        continue-on-error: true

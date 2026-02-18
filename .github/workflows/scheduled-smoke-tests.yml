@@ -68,7 +68,7 @@ jobs:
           CARD_EXPIRY_MONTH: ${{ secrets.CARD_EXPIRY_MONTH }}
           CARD_EXPIRY_YEAR: ${{ secrets.CARD_EXPIRY_YEAR }}
           CI: "true"
-        run: npx playwright test --grep @smoke --project=${{ matrix.browser }} --reporter=list,html
+        run: npx playwright test --grep "@smoke" --project=${{ matrix.browser }}
         continue-on-error: true
 
       - name: Upload results (${{ matrix.browser }})
@@ -79,6 +79,7 @@ jobs:
           path: |
             reports/
             test-results/
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Write step summary

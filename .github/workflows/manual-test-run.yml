@@ -83,7 +83,7 @@ jobs:
 
           # Suite filter
           switch ($suite) {
-            "smoke"  { $args += "--grep", "@smoke" }
+            "smoke"  { $args += "--grep", '"@smoke"' }
             "ui"     { $args += "tests/ui/" }
             "api"    { $args += "tests/api/" }
           }
@@ -97,9 +97,6 @@ jobs:
           if ($retries -and $retries -ne "0") {
             $args += "--retries=$retries"
           }
-
-          # Reporter
-          $args += "--reporter=list,html"
 
           $cmdArgs = $args -join " "
           Write-Host "Test command args: $cmdArgs"
@@ -128,6 +125,7 @@ jobs:
           path: |
             reports/
             test-results/
+          if-no-files-found: ignore
           retention-days: 30
 
       - name: Write step summary

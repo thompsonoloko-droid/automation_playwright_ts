@@ -55,7 +55,7 @@ async function blockAds(page: Page): Promise<void> {
 export const test = base.extend<Fixtures>({
   homePage: async ({ page }, use) => {
     await blockAds(page);
-    await page.goto("https://automationexercise.com", {
+    await page.goto("/", {
       waitUntil: "domcontentloaded",
     });
     await use(new HomePage(page));

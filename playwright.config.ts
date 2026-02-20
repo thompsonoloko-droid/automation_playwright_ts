@@ -45,11 +45,11 @@ export default defineConfig({
     // --- Mobile emulation ---
     {
       name: "mobile-chrome",
-      use: { ...devices["iPhone 13"] },
+      use: { ...devices["Pixel 5"] },
     },
     {
       name: "mobile-safari",
-      use: { ...devices["iPhone 13"], browserName: "webkit" },
+      use: { ...devices["iPhone 13"] },
     },
   ],
 });

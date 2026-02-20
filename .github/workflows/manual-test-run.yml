@@ -50,10 +50,10 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: "npm"
@@ -79,26 +79,26 @@ jobs:
           $browser = "${{ github.event.inputs.browser }}"
           $retries = "${{ github.event.inputs.retries }}"
 
-          $args = @()
+          $testArgs = @()
 
           # Suite filter
           switch ($suite) {
-            "smoke"  { $args += "--grep", '"@smoke"' }
-            "ui"     { $args += "tests/ui/" }
-            "api"    { $args += "tests/api/" }
+            "smoke"  { $testArgs += "--grep", '"@smoke"' }
+            "ui"     { $testArgs += "tests/ui/" }
+            "api"    { $testArgs += "tests/api/" }
           }
 
           # Browser filter
           if ($browser -ne "all") {
-            $args += "--project=$browser"
+            $testArgs += "--project=$browser"
           }
 
           # Retries
           if ($retries -and $retries -ne "0") {
-            $args += "--retries=$retries"
+            $testArgs += "--retries=$retries"
           }
 
-          $cmdArgs = $args -join " "
+          $cmdArgs = $testArgs -join " "
           Write-Host "Test command args: $cmdArgs"
           echo "args=$cmdArgs" >> $env:GITHUB_OUTPUT
 
@@ -119,7 +119,7 @@ jobs:
 
       - name: Upload test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: manual-test-results-${{ github.run_id }}
           path: |

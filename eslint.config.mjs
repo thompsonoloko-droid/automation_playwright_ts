@@ -22,8 +22,7 @@ export default tseslint.config(
       "no-empty": ["error", { allowEmptyCatch: true }],
       // Warn on explicit any
       "@typescript-eslint/no-explicit-any": "warn",
-      // Allow re-throwing without cause (common in wrapper error patterns)
-      "preserve-caught-error": "off",
+
     },
   },
   {

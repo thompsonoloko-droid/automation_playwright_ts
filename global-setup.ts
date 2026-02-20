@@ -10,6 +10,7 @@ import path from "path";
 const ARTIFACT_DIRS = [
   "test-results",
   path.join("reports", "html"),
+  path.join("reports", "screenshots"),
 ];
 
 function cleanDir(dirPath: string): void {

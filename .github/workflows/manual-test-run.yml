@@ -71,6 +71,38 @@ jobs:
             npx playwright install --with-deps $browser
           }
 
+      - name: Verify required secrets
+        env:
+          TEST_USER_NAME: ${{ secrets.TEST_USER_NAME }}
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+          CARD_NAME: ${{ secrets.CARD_NAME }}
+          CARD_NUMBER: ${{ secrets.CARD_NUMBER }}
+          CARD_CVC: ${{ secrets.CARD_CVC }}
+          CARD_EXPIRY_MONTH: ${{ secrets.CARD_EXPIRY_MONTH }}
+          CARD_EXPIRY_YEAR: ${{ secrets.CARD_EXPIRY_YEAR }}
+        shell: pwsh
+        run: |
+          $missing = @()
+          $vars = @(
+            "TEST_USER_NAME", "TEST_USER_EMAIL", "TEST_USER_PASSWORD",
+            "CARD_NAME", "CARD_NUMBER", "CARD_CVC",
+            "CARD_EXPIRY_MONTH", "CARD_EXPIRY_YEAR"
+          )
+          foreach ($v in $vars) {
+            $val = [Environment]::GetEnvironmentVariable($v)
+            if ([string]::IsNullOrEmpty($val)) {
+              Write-Host "MISSING: $v"
+              $missing += $v
+            } else {
+              Write-Host "FOUND: $v"
+            }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::Missing secrets: $($missing -join ', '). Add them in Settings > Secrets > Actions."
+            exit 1
+          }
+
       - name: Build test command
         id: cmd
         shell: pwsh

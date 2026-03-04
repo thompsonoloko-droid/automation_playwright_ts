@@ -1,5 +1,11 @@
 # Playwright TypeScript Test Automation Framework
 
+# automation_playwright_dele
+
+[![Test Automation Pipeline](https://github.com/thompsonoloko-droid/automation_playwright_ts/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/thompsonoloko-droid/automation_playwright_ts/actions/workflows/ci-cd.yml)
+[![Playwright Version](https://img.shields.io/badge/playwright-1.58.0-brightgreen)]()
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Production-ready Playwright + TypeScript based test automation framework for e-commerce testing with comprehensive Page Object Model (POM) architecture, data-driven testing, CI/CD (Windows) integration and advanced reporting.
 
 ## Tech Stack

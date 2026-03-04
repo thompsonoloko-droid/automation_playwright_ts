@@ -1,6 +1,6 @@
 # Playwright TypeScript Test Automation Framework
 
-# automation_playwright_dele
+# automation_playwright_ts
 
 [![Test Automation Pipeline](https://github.com/thompsonoloko-droid/automation_playwright_ts/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/thompsonoloko-droid/automation_playwright_ts/actions/workflows/ci-cd.yml)
 [![Playwright Version](https://img.shields.io/badge/playwright-1.58.0-brightgreen)]()
